@@ -12,9 +12,7 @@
 #include "msm_cci.h"
 #include "../msm_ois.h"
 #define MSM_CAMERA_V2
-#endif
-
-#ifdef CONFIG_SPECTRA_CAMERA
+#else
 #include "../cam_ois_core.h"
 #include "../cam_ois_soc.h"
 #include "../cam_ois_dev.h"
