@@ -16,6 +16,137 @@
 
 #define MAX_READ_SIZE  0x7FFFF
 
+#define S5K4H7_OTP_SLAVE_ADDR       0x5A
+#define S5K4H7_OTP_PAGE_SIZE        64
+
+/* MIPI CCS data transfer interface registers */
+#define S5K4H7_OTP_CTRL_ADDR        0x0A00
+#define S5K4H7_OTP_CTRL_ENABLE      0x01
+#define S5K4H7_OTP_CTRL_CLEAR_ERR   0x04
+#define S5K4H7_OTP_STATUS_ADDR      0x0A01
+#define S5K4H7_OTP_STATUS_READY     0x01
+#define S5K4H7_OTP_PAGE_SELECT_ADDR 0x0A02
+#define S5K4H7_OTP_DATA_ADDR        0x0A04
+
+/**
+ * cam_eeprom_s5k4h7_read_otp - Read S5K4H7 OTP data
+ * @e_ctrl:     ctrl structure
+ * @addr:       OTP address to start reading from
+ * @data:       buffer to read into
+ * @num_bytes:  number of bytes to read
+ *
+ * The OTP is only accessible one page at a time through the data transfer
+ * interface, so this function splits the read into page reads.
+ *
+ * Returns success or failure
+ */
+static int cam_eeprom_s5k4h7_read_otp(struct cam_eeprom_ctrl_t *e_ctrl,
+	uint32_t addr, uint8_t *data, uint32_t num_bytes)
+{
+	int                                rc = 0;
+	uint32_t                           end = addr + num_bytes;
+	uint32_t                           page, offset, len;
+	struct cam_sensor_i2c_reg_setting  i2c_reg_settings = {0};
+	struct cam_sensor_i2c_reg_array    load_setting[] = {
+		{S5K4H7_OTP_PAGE_SELECT_ADDR, 0},
+		/* Vendor specific OTP setup */
+		{0x3B41, 0x01},
+		{0x3B42, 0x03},
+		{0x3B40, 0x01},
+		{S5K4H7_OTP_CTRL_ADDR, S5K4H7_OTP_CTRL_ENABLE},
+	};
+	struct cam_sensor_i2c_reg_array    unload_setting[] = {
+		{S5K4H7_OTP_CTRL_ADDR, S5K4H7_OTP_CTRL_CLEAR_ERR},
+		{S5K4H7_OTP_CTRL_ADDR, 0},
+	};
+
+	i2c_reg_settings.addr_type = CAMERA_SENSOR_I2C_TYPE_WORD;
+	i2c_reg_settings.data_type = CAMERA_SENSOR_I2C_TYPE_BYTE;
+	i2c_reg_settings.size = ARRAY_SIZE(load_setting);
+	i2c_reg_settings.reg_setting = load_setting;
+
+	while (addr < end) {
+		page = addr / S5K4H7_OTP_PAGE_SIZE;
+		offset = addr % S5K4H7_OTP_PAGE_SIZE;
+		len = min(end - addr, S5K4H7_OTP_PAGE_SIZE - offset);
+
+		load_setting[0].reg_data = page;
+		rc = camera_io_dev_write(&e_ctrl->io_master_info,
+			&i2c_reg_settings);
+		if (rc) {
+			CAM_ERR(CAM_EEPROM, "page %u load failed rc %d",
+				page, rc);
+			goto unload;
+		}
+
+		rc = camera_io_dev_poll(&e_ctrl->io_master_info,
+			S5K4H7_OTP_STATUS_ADDR, S5K4H7_OTP_STATUS_READY,
+			0, CAMERA_SENSOR_I2C_TYPE_WORD,
+			CAMERA_SENSOR_I2C_TYPE_BYTE,
+			MAX_POLL_DELAY_MS);
+		if (rc) {
+			CAM_ERR(CAM_EEPROM, "page %u poll failed rc %d",
+				page, rc);
+			if (rc > 0)
+				rc = -ETIMEDOUT;
+			goto unload;
+		}
+
+		rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
+			S5K4H7_OTP_DATA_ADDR + offset, data,
+			CAMERA_SENSOR_I2C_TYPE_WORD,
+			CAMERA_SENSOR_I2C_TYPE_BYTE,
+			len);
+		if (rc < 0) {
+			CAM_ERR(CAM_EEPROM, "page %u read failed rc %d",
+				page, rc);
+			goto unload;
+		}
+
+		addr += len;
+		data += len;
+	}
+
+unload:
+	i2c_reg_settings.size = ARRAY_SIZE(unload_setting);
+	i2c_reg_settings.reg_setting = unload_setting;
+	if (camera_io_dev_write(&e_ctrl->io_master_info, &i2c_reg_settings))
+		CAM_ERR(CAM_EEPROM, "unload failed");
+
+	return rc;
+}
+
+/**
+ * cam_eeprom_read_seq - Read sequential data from eeprom
+ * @e_ctrl:     ctrl structure
+ * @addr:       address to start reading from
+ * @data:       buffer to read into
+ * @addr_type:  address type
+ * @data_type:  data type
+ * @num_bytes:  number of bytes to read
+ *
+ * This function reads through camera_io_dev_read_seq(), except for the
+ * S5K4H7 OTP which needs its own read sequence.
+ *
+ * Returns success or failure
+ */
+static int cam_eeprom_read_seq(struct cam_eeprom_ctrl_t *e_ctrl,
+	uint32_t addr, uint8_t *data,
+	enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type,
+	int32_t num_bytes)
+{
+	struct cam_eeprom_soc_private *soc_private =
+		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
+
+	if (soc_private->i2c_info.slave_addr == S5K4H7_OTP_SLAVE_ADDR)
+		return cam_eeprom_s5k4h7_read_otp(e_ctrl, addr, data,
+			num_bytes);
+
+	return camera_io_dev_read_seq(&e_ctrl->io_master_info, addr, data,
+		addr_type, data_type, num_bytes);
+}
+
 /**
  * cam_eeprom_read_memory() - read map data into buffer
  * @e_ctrl:     eeprom control struct
@@ -110,7 +241,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 		}
 
 		if (emap[j].mem.valid_size) {
-			rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
+			rc = cam_eeprom_read_seq(e_ctrl,
 				emap[j].mem.addr, memptr,
 				emap[j].mem.addr_type,
 				emap[j].mem.data_type,
