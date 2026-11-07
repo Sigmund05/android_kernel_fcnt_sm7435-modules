@@ -194,7 +194,7 @@ int aw_i2c_writes(struct aw_ois_dev *aw_dev, uint32_t reg_addr,
 		i2c_reg_setting.reg_setting[cnt].data_mask = 0;
 	}
 	ret = camera_io_dev_write_continuous(&(aw_dev->o_ctrl->io_master_info),
-			&i2c_reg_setting, 0);
+			&i2c_reg_setting, CAM_SENSOR_I2C_WRITE_SEQ);
 	if (ret < 0)
 		AW_LOGE("err! ret:%d", ret);
 	aw_dev->o_ctrl->io_master_info.cci_client->i2c_freq_mode = temp_freq;
