@@ -16,6 +16,89 @@
 
 #define MAX_READ_SIZE  0x7FFFF
 
+/* The S5K4H7 OTP shares the sensor address */
+#define S5K4H7_SID            (0x5A >> 1)
+#define S5K4H7_OTP_PAGE_SIZE  64
+
+/*
+ * Wrapper around camera_io_dev_read_seq(). The S5K4H7 OTP is read 64 bytes
+ * at a time through the MIPI CCS data transfer interface.
+ */
+static int32_t cam_eeprom_read_seq(struct camera_io_master *io_master_info,
+	uint32_t addr, uint8_t *data, enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type, int32_t num_bytes)
+{
+	struct cam_sensor_i2c_reg_array    load[] = {
+		/* DATA_TRANSFER_IF_1_PAGE_SELECT */
+		{0x0A02, 0x00},
+		/* Vendor specific OTP setup */
+		{0x3B41, 0x01}, {0x3B42, 0x03}, {0x3B40, 0x01},
+		/* DATA_TRANSFER_IF_1_CTRL: enable */
+		{0x0A00, 0x01},
+	};
+	struct cam_sensor_i2c_reg_array    unload[] = {
+		/* DATA_TRANSFER_IF_1_CTRL: clear error, disable */
+		{0x0A00, 0x04}, {0x0A00, 0x00},
+	};
+	struct cam_sensor_i2c_reg_setting  i2c_reg_settings = {0};
+	uint32_t                           end = addr + num_bytes;
+	uint32_t                           len;
+	int32_t                            rc = 0;
+	int32_t                            ret;
+
+	if (io_master_info->master_type != CCI_MASTER ||
+		io_master_info->cci_client->sid != S5K4H7_SID)
+		return camera_io_dev_read_seq(io_master_info, addr, data,
+			addr_type, data_type, num_bytes);
+
+	i2c_reg_settings.addr_type = CAMERA_SENSOR_I2C_TYPE_WORD;
+	i2c_reg_settings.data_type = CAMERA_SENSOR_I2C_TYPE_BYTE;
+	i2c_reg_settings.reg_setting = load;
+	i2c_reg_settings.size = ARRAY_SIZE(load);
+
+	while (addr < end) {
+		len = min(end - addr,
+			S5K4H7_OTP_PAGE_SIZE - addr % S5K4H7_OTP_PAGE_SIZE);
+
+		/* Select the page and load it into the read buffer */
+		load[0].reg_data = addr / S5K4H7_OTP_PAGE_SIZE;
+		rc = camera_io_dev_write(io_master_info, &i2c_reg_settings);
+		if (rc)
+			break;
+
+		/* Wait for DATA_TRANSFER_IF_1_STATUS to report READ_IF_READY */
+		rc = camera_io_dev_poll(io_master_info, 0x0A01, 0x01, 0,
+			CAMERA_SENSOR_I2C_TYPE_WORD,
+			CAMERA_SENSOR_I2C_TYPE_BYTE, MAX_POLL_DELAY_MS);
+		if (rc > 0)
+			rc = -ETIMEDOUT;
+		if (rc)
+			break;
+
+		/* DATA_TRANSFER_IF_1_DATA */
+		rc = camera_io_dev_read_seq(io_master_info,
+			0x0A04 + addr % S5K4H7_OTP_PAGE_SIZE, data,
+			CAMERA_SENSOR_I2C_TYPE_WORD,
+			CAMERA_SENSOR_I2C_TYPE_BYTE, len);
+		if (rc)
+			break;
+
+		addr += len;
+		data += len;
+	}
+
+	if (rc)
+		CAM_ERR(CAM_EEPROM, "S5K4H7 OTP page %u read failed rc %d",
+			addr / S5K4H7_OTP_PAGE_SIZE, rc);
+
+	/* Leave OTP read mode even if the read failed */
+	i2c_reg_settings.reg_setting = unload;
+	i2c_reg_settings.size = ARRAY_SIZE(unload);
+	ret = camera_io_dev_write(io_master_info, &i2c_reg_settings);
+
+	return rc ? rc : ret;
+}
+
 /**
  * cam_eeprom_read_memory() - read map data into buffer
  * @e_ctrl:     eeprom control struct
@@ -110,7 +193,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 		}
 
 		if (emap[j].mem.valid_size) {
-			rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
+			rc = cam_eeprom_read_seq(&e_ctrl->io_master_info,
 				emap[j].mem.addr, memptr,
 				emap[j].mem.addr_type,
 				emap[j].mem.data_type,
