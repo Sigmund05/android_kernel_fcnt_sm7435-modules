@@ -9,6 +9,7 @@
 #include "cam_ois_core.h"
 #include "cam_debug_util.h"
 #include "camera_main.h"
+#include "aw86006/aw86006_interface.h"
 
 static int cam_ois_subdev_close_internal(struct v4l2_subdev *sd,
 	struct v4l2_subdev_fh *fh)
@@ -368,6 +369,12 @@ static int cam_ois_component_bind(struct device *dev,
 		CAM_ERR(CAM_OIS, "failed: to update i2c info rc %d", rc);
 		goto unreg_subdev;
 	}
+
+	rc = aw86006_ois_init(o_ctrl);
+	if (rc) {
+		CAM_ERR(CAM_OIS, "failed: to init aw86006 rc %d", rc);
+		goto unreg_subdev;
+	}
 	o_ctrl->bridge_intf.device_hdl = -1;
 
 	platform_set_drvdata(pdev, o_ctrl);
@@ -402,6 +409,7 @@ static void cam_ois_component_unbind(struct device *dev,
 	}
 
 	CAM_INFO(CAM_OIS, "platform driver remove invoked");
+	aw86006_ois_exit();
 	soc_info = &o_ctrl->soc_info;
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);

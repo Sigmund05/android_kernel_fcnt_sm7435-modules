@@ -2,6 +2,8 @@
 #ifndef AW86006_INTERFACE_H
 #define AW86006_INTERFACE_H
 
+#include <linux/firmware.h>
+
 /* #define AW_FW_VERSION_4 */
 
 #ifdef CONFIG_MSMB_CAMERA
@@ -110,5 +112,7 @@ struct aw_ois_dev {
 };
 
 int aw_firmware_update(const struct firmware *fw);
+int aw86006_ois_init(void *o_ctrl);
+int aw86006_ois_exit(void);
 
 #endif /* AW86006_INTERFACE_H */
