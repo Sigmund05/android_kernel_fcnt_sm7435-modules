@@ -1941,6 +1941,10 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
+	"qcom,mdss-dsi-dfps-60-command",
+	"qcom,mdss-dsi-dfps-90-command",
+	"qcom,mdss-dsi-dfps-120-command",
+	"qcom,mdss-dsi-dfps-144-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -1969,6 +1973,10 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
+	"qcom,mdss-dsi-dfps-60-command-state",
+	"qcom,mdss-dsi-dfps-90-command-state",
+	"qcom,mdss-dsi-dfps-120-command-state",
+	"qcom,mdss-dsi-dfps-144-command-state",
 };
 
 int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -4817,6 +4825,50 @@ int dsi_panel_switch(struct dsi_panel *panel)
 	return rc;
 }
 
+static int dsi_panel_tx_dfps_cmd(struct dsi_panel *panel)
+{
+	enum dsi_cmd_set_type type;
+
+	switch (panel->cur_mode->timing.refresh_rate) {
+	case 60:
+		type = DSI_CMD_SET_DFPS_60;
+		break;
+	case 90:
+		type = DSI_CMD_SET_DFPS_90;
+		break;
+	case 120:
+		type = DSI_CMD_SET_DFPS_120;
+		break;
+	case 144:
+		type = DSI_CMD_SET_DFPS_144;
+		break;
+	default:
+		return 0;
+	}
+
+	return dsi_panel_tx_cmd_set(panel, type);
+}
+
+int dsi_panel_switch_dfps(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	if (!panel || !panel->cur_mode) {
+		DSI_ERR("Invalid params\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&panel->panel_lock);
+
+	rc = dsi_panel_tx_dfps_cmd(panel);
+	if (rc)
+		DSI_ERR("[%s] failed to send dfps cmds, rc=%d\n",
+		       panel->name, rc);
+
+	mutex_unlock(&panel->panel_lock);
+	return rc;
+}
+
 int dsi_panel_post_switch(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -4870,6 +4922,14 @@ int dsi_panel_enable(struct dsi_panel *panel)
 			goto error;
 		}
 	}
+
+	rc = dsi_panel_tx_dfps_cmd(panel);
+	if (rc) {
+		DSI_ERR("[%s] failed to send dfps cmds, rc=%d\n",
+		       panel->name, rc);
+		goto error;
+	}
+
 	panel->panel_initialized = true;
 
 error:
