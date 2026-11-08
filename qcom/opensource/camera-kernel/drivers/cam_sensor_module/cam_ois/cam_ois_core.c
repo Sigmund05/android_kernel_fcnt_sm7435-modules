@@ -15,6 +15,7 @@
 #include "cam_res_mgr_api.h"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
+#include "aw86006/aw86006_interface.h"
 
 int32_t cam_ois_construct_default_power_setting(
 	struct cam_sensor_power_ctrl_t *power_info)
@@ -354,6 +355,21 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 	return rc;
 }
 
+static int cam_ois_aw86006_fw_download(struct cam_ois_ctrl_t *o_ctrl)
+{
+	const struct firmware             *fw = NULL;
+	int32_t                            rc = 0;
+
+	rc = request_firmware(&fw, AW_FW_NAME, &(o_ctrl->pdev->dev));
+	if (rc) {
+		CAM_ERR(CAM_OIS, "Failed to locate %s", AW_FW_NAME);
+		return rc;
+	}
+
+	/* aw_firmware_update() releases the firmware */
+	return aw_firmware_update(fw) ? -EIO : 0;
+}
+
 static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 {
 	uint16_t                           total_bytes = 0;
@@ -373,6 +389,9 @@ static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 		CAM_ERR(CAM_OIS, "Invalid Args");
 		return -EINVAL;
 	}
+
+	if (!strcmp(o_ctrl->ois_name, AW_OIS_NAME))
+		return cam_ois_aw86006_fw_download(o_ctrl);
 
 	snprintf(name_coeff, 32, "%s.coeff", o_ctrl->ois_name);
 
