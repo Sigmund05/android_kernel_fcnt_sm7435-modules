@@ -1941,6 +1941,10 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
+	"qcom,mdss-dsi-60-on-command",
+	"qcom,mdss-dsi-90-on-command",
+	"qcom,mdss-dsi-120-on-command",
+	"qcom,mdss-dsi-144-on-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -1969,6 +1973,10 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
+	"qcom,mdss-dsi-60-on-command-state",
+	"qcom,mdss-dsi-90-on-command-state",
+	"qcom,mdss-dsi-120-on-command-state",
+	"qcom,mdss-dsi-144-on-command-state",
 };
 
 int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -4817,6 +4825,50 @@ int dsi_panel_switch(struct dsi_panel *panel)
 	return rc;
 }
 
+static int dsi_panel_tx_refresh_rate_cmd(struct dsi_panel *panel)
+{
+	enum dsi_cmd_set_type type;
+
+	switch (panel->cur_mode->timing.refresh_rate) {
+	case 60:
+		type = DSI_CMD_SET_60_ON;
+		break;
+	case 90:
+		type = DSI_CMD_SET_90_ON;
+		break;
+	case 120:
+		type = DSI_CMD_SET_120_ON;
+		break;
+	case 144:
+		type = DSI_CMD_SET_144_ON;
+		break;
+	default:
+		return 0;
+	}
+
+	return dsi_panel_tx_cmd_set(panel, type);
+}
+
+int dsi_panel_switch_refresh_rate(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	if (!panel || !panel->cur_mode) {
+		DSI_ERR("Invalid params\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&panel->panel_lock);
+
+	rc = dsi_panel_tx_refresh_rate_cmd(panel);
+	if (rc)
+		DSI_ERR("[%s] failed to send refresh rate cmds, rc=%d\n",
+		       panel->name, rc);
+
+	mutex_unlock(&panel->panel_lock);
+	return rc;
+}
+
 int dsi_panel_post_switch(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -4869,6 +4921,13 @@ int dsi_panel_enable(struct dsi_panel *panel)
 			       panel->name, rc);
 			goto error;
 		}
+	}
+
+	rc = dsi_panel_tx_refresh_rate_cmd(panel);
+	if (rc) {
+		DSI_ERR("[%s] failed to send refresh rate cmds, rc=%d\n",
+		       panel->name, rc);
+		goto error;
 	}
 	panel->panel_initialized = true;
 

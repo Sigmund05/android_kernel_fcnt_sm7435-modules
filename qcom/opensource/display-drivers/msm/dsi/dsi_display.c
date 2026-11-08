@@ -4937,6 +4937,7 @@ static int dsi_display_dfps_update(struct dsi_display *display,
 	 */
 	panel_mode->dsi_mode_flags = 0;
 
+	dsi_panel_switch_refresh_rate(display->panel);
 error:
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 	return rc;
