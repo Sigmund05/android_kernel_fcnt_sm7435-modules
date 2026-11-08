@@ -160,8 +160,16 @@ static int32_t cam_actuator_i2c_modes_util(
 	uint32_t i, size;
 
 	if (i2c_list->op_code == CAM_SENSOR_I2C_WRITE_RANDOM) {
-		rc = camera_io_dev_write(io_master_info,
-			&(i2c_list->i2c_settings));
+		for (i = 0; i < ACTUATOR_MAX_WRITE_RETRY; i++) {
+			rc = camera_io_dev_write(io_master_info,
+				&(i2c_list->i2c_settings));
+			if (rc >= 0)
+				break;
+
+			CAM_DBG(CAM_ACTUATOR,
+				"Random write failed, retry: %u rc: %d", i, rc);
+			usleep_range(1000, 1500);
+		}
 		if (rc < 0) {
 			CAM_ERR(CAM_ACTUATOR,
 				"Failed to random write I2C settings: %d",

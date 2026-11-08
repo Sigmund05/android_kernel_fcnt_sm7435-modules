@@ -35,6 +35,7 @@
 
 #define MSM_ACTUATOR_MAX_VREGS (10)
 #define ACTUATOR_MAX_POLL_COUNT 10
+#define ACTUATOR_MAX_WRITE_RETRY 5
 
 enum cam_actuator_apply_state_t {
 	ACT_APPLY_SETTINGS_NOW,
